@@ -1,12 +1,20 @@
 import tushare as ts
 import pandas as pd
 import numpy as np
-import tensorflow as tf
-import keras
-from keras.layers import Input, Dense, LSTM, merge
-from keras.models import Model
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import scale
+
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import AdaBoostRegressor
+
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import median_absolute_error
+from sklearn.metrics import explained_variance_score
+from sklearn.metrics import r2_score
 
 # stimu function
 def atan(x): 
@@ -23,61 +31,168 @@ class conf:
     seq_len = 30 #each sample
     batch = 100 #one gradient descent with 100 samples 
 
-# geting data from tushare and preprocessing
+def getData():
+    # geting data from tushare and preprocessing
 
-df = ts.get_k_data(conf.instrument, conf.start_date, conf.end_date)
-#df.to_csv("600000data.csv", index=False, sep=',')
-df['amount'] = df['close']*df['volume']
-df['return'] = df['close'].shift(-5) / df['close'].shift(-1) - 1 #return(yield rate) = close price 5 days after / close price tomorrow
-#df['return'] = df['return'].apply(lambda x:np.where(x>=0.2,0.2,np.where(x>-0.2,x,-0.2)))
-df['return'] = df['return']*10 #just for training
-df.dropna(inplace=True)
-dftime = df['date'][df.date>=conf.split_date]
-df.reset_index(drop=True, inplace=True)
-scaledf = df[conf.fields]
-traindf = df[df.date<conf.split_date]
+    df = ts.get_k_data(conf.instrument, conf.start_date, conf.end_date)
+    #df.to_csv("600000data.csv", index=False, sep=',')
+    df['amount'] = df['close']*df['volume']
+    df['return'] = df['close'].shift(-5) / df['close'].shift(-1) - 1 #return(yield rate) = close price 5 days after / close price tomorrow
+    #df['return'] = df['return'].apply(lambda x:np.where(x>=0.2,0.2,np.where(x>-0.2,x,-0.2)))
+    df['return'] = df['return']
+    df.dropna(inplace=True)
+    dftime = df['date'][df.date>=conf.split_date]
+    df.reset_index(drop=True, inplace=True)
+    scaledf = df[conf.fields]
+    traindf = df[df.date<conf.split_date]
 
-train_input = []
-train_output = []
-test_input = []
-test_output = []
-for i in range(conf.seq_len-1, len(traindf)):
-    a = scale(scaledf[i+1-conf.seq_len:i+1])
-    train_input.append(a)
-    c = df['return'][i]
-    train_output.append(c)
+    train_input = []
+    train_output = []
+    test_input = []
+    test_output = []
+    for i in range(conf.seq_len-1, len(traindf)):
+        a = scale(scaledf[i+1-conf.seq_len:i+1])
+        train_input.append(a)
+        c = df['return'][i]
+        train_output.append(c)
     
-for i in range(len(traindf), len(df)):
-    a = scale(scaledf[i+1-conf.seq_len:i+1])
-    test_input.append(a)
-    c = df['return'][i]
-    test_output.append(c)
+    for i in range(len(traindf), len(df)):
+        a = scale(scaledf[i+1-conf.seq_len:i+1])
+        test_input.append(a)
+        c = df['return'][i]
+        test_output.append(c)
+    
+    train_m = len(train_output)
+    test_m = len(test_output)
+    
+    train_input = np.array(train_input).reshape(train_m,-1)
+    test_input = np.array(test_input).reshape(test_m,-1)
+    
+    train_output = np.array(train_output)
+    test_output = np.array(test_output)
+    
+    return train_input,train_output,test_input,test_output
 
-train_x = np.array(train_input)
-train_y = np.array(train_output)
-test_x = np.array(test_input) 
-test_y = np.array(test_output)
+    
+def draw(y_test,y_pred, model_name):
 
-lstm_input = Input(shape=(30,6), name='lstm_input')
-lstm_output = LSTM(128, activation=atan, dropout_W=0.2, dropout_U=0.1)(lstm_input)
-Dense_output_1 = Dense(64, activation='linear', kernel_regularizer=keras.regularizers.l1(0.))(lstm_output)
-Dense_output_2 = Dense(16, activation='linear')(Dense_output_1)
-predictions = Dense(1, activation=atan)(Dense_output_2)
-model = Model(input=lstm_input, output=predictions)
-model.compile(optimizer='adam', loss='mse', metrics=['mse'])
-model.fit(train_x, train_y, batch_size=conf.batch, nb_epoch=10, verbose=2)
+    plt.title('Return Rate prediction---' + model_name)
 
-predictions = model.predict(test_x)
+    xindex = range(len(y_test))
+    plt.plot(xindex, y_test, color = 'red', label='ground truth')
+    plt.plot(xindex, y_pred, color = 'blue', label='prediction')
+    plt.xlabel('Date')
+    plt.ylabel('Return Rate')
+    plt.legend(('ground truth','prediction'))
+    plt.show()
+    
+def doSVR(x_train, y_train, x_test, y_test):
 
-plt.title('Return Rate Estimation')
 
-xindex = range(len(test_y))
-test_y = test_y/10
-plt.plot(xindex, test_y, color = 'red', label='true return rate')
-plt.plot(xindex, predictions, color = 'blue', label='estimation')
-plt.xlabel('Date')
-plt.ylabel('Return Rate')
+    model = SVR()
+    
+    model.fit(x_train,y_train)
+    
+    y_pred = model.predict(x_test)
+    print('EVS of SVR:',explained_variance_score(y_test,y_pred))
+    print('MAE of SVR:',median_absolute_error(y_test,y_pred))
+    print('MSE of SVR:',mean_squared_error(y_test,y_pred))
+    print('R2 of SVR:',r2_score(y_test,y_pred))
+    
+    draw(y_test,y_pred,'SVR')
 
-plt.show()
+def doDecision_Tree(x_train, y_train, x_test, y_test):
+
+
+    model = DecisionTreeRegressor()
+    
+    model.fit(x_train,y_train)
+    
+    y_pred = model.predict(x_test)
+    print('EVS of DecisionTreeRegressor:',explained_variance_score(y_test,y_pred))
+    print('MAE of DecisionTreeRegressor:',median_absolute_error(y_test,y_pred))
+    print('MSE of DecisionTreeRegressor:',mean_squared_error(y_test,y_pred))
+    print('R2 of DecisionTreeRegressor:',r2_score(y_test,y_pred))
+    
+    draw(y_test,y_pred,'DecisionTreeRegressor')
+    
+def doLR(x_train, y_train, x_test, y_test):
+
+
+    model = LinearRegression()
+    
+    model.fit(x_train,y_train)
+    
+    y_pred = model.predict(x_test)
+    print('EVS of LinearRegression:',explained_variance_score(y_test,y_pred))
+    print('MAE of LinearRegression:',median_absolute_error(y_test,y_pred))
+    print('MSE of LinearRegression:',mean_squared_error(y_test,y_pred))
+    print('R2 of LinearRegression:',r2_score(y_test,y_pred))
+    
+    draw(y_test,y_pred,'LinearRegression')
+
+def doKNN(x_train, y_train, x_test, y_test):
+
+
+    model = KNeighborsRegressor()
+    
+    model.fit(x_train,y_train)
+    
+    y_pred = model.predict(x_test)
+    
+    print('EVS of KNeighborsRegressor:',explained_variance_score(y_test,y_pred))
+    print('MAE of KNeighborsRegressor:',median_absolute_error(y_test,y_pred))
+    print('MSE of KNeighborsRegressor:',mean_squared_error(y_test,y_pred))
+    print('R2 of KNeighborsRegressor:',r2_score(y_test,y_pred))
+    
+    draw(y_test,y_pred,'KNeighborsRegressor')
+
+def doRF(x_train, y_train, x_test, y_test):
+
+
+    model = RandomForestRegressor(n_estimators=30)
+    
+    model.fit(x_train,y_train)
+    
+    y_pred = model.predict(x_test)
+    
+    print('EVS of RandomForestRegressor:',explained_variance_score(y_test,y_pred))
+    print('MAE of RandomForestRegressor:',median_absolute_error(y_test,y_pred))
+    print('MSE of RandomForestRegressor:',mean_squared_error(y_test,y_pred))
+    print('R2 of RandomForestRegressor:',r2_score(y_test,y_pred))
+    
+    draw(y_test,y_pred,'RandomForestRegressor')
+
+def doAdaBoostRegressor(x_train, y_train, x_test, y_test):
+
+
+    model = AdaBoostRegressor(n_estimators=30)
+
+    model.fit(x_train,y_train)
+    
+    y_pred = model.predict(x_test)
+    
+    print('EVS of AdaBoostRegressor:',explained_variance_score(y_test,y_pred))
+    print('MAE of AdaBoostRegressor:',median_absolute_error(y_test,y_pred))
+    print('MSE of AdaBoostRegressor:',mean_squared_error(y_test,y_pred))
+    print('R2 of AdaBoostRegressor:',r2_score(y_test,y_pred))
+    draw(y_test,y_pred,'AdaBoostRegressor')
+
+if __name__ == '__main__':
+
+
+    train_input,train_output,test_input,test_output = getData()
+
+
+    
+    doSVR(train_input,train_output,test_input,test_output)
+    doDecision_Tree(train_input,train_output,test_input,test_output)
+    doLR(train_input,train_output,test_input,test_output)
+    doKNN(train_input,train_output,test_input,test_output)
+    doRF(train_input,train_output,test_input,test_output)
+    doAdaBoostRegressor(train_input,train_output,test_input,test_output)
+    
+
+    
 
 
